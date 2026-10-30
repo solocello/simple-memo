@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>메모장</title>
+<style>*{box-sizing:border-box}body{margin:24px auto;padding:0 16px;max-width:600px;font:16px system-ui;background:white;color:#222}section,article{border:1px solid #ddd;border-radius:8px;padding:16px;margin:12px 0}input,textarea,button{font:inherit;max-width:100%;padding:10px}input,textarea{width:100%;margin:8px 0;border:1px solid #aaa;border-radius:4px}button{cursor:pointer;margin:4px}button:disabled{cursor:wait}p{overflow-wrap:anywhere}article p{white-space:pre-wrap}[hidden]{display:none!important}#status{min-height:24px}</style>
+<h1>메모장</h1>
+<section id="auth"><form id="loginForm"><label>이메일<input id="email" type="email" required autocomplete="email"></label><label>비밀번호<input id="password" type="password" required minlength="6" autocomplete="current-password"></label><button type="submit">로그인</button><button type="button" id="signup">회원가입</button></form></section>
+<section id="app" hidden><p id="who"></p><button id="logout">로그아웃</button><form id="memoForm"><label>메모 내용<textarea id="content" rows="4" required maxlength="10000"></textarea></label><button type="submit">저장</button></form><div id="list"></div></section>
+<p id="status" role="status" aria-live="polite"></p>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let db,user=null,busy=false;
+function message(s){$('status').textContent=s}
+async function run(task,label='처리 중…'){
+ if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);message(label);
+ try{await task();message('완료');}catch(e){message('오류: '+(e.message||'다시 시도해 주세요.'))}
+ finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false)}
+}
+async function list(){
+ const {data,error}=await db.from('memos').select('id,content,created_at').order('created_at',{ascending:false});if(error)throw error;
+ $('list').replaceChildren();
+ if(!data.length){$('list').textContent='저장된 메모가 없습니다.';return}
+ for(const memo of data){const card=document.createElement('article'),p=document.createElement('p'),button=document.createElement('button');
+ p.textContent=memo.content;button.textContent='삭제';
+ button.onclick=()=>run(async()=>{const {error}=await db.from('memos').delete().eq('id',memo.id);if(error)throw error;await list()});
+ card.append(p,button);$('list').append(card)}
+}
+async function show(session){
+ user=session?.user||null;$('auth').hidden=!!user;$('app').hidden=!user;$('list').replaceChildren();$('content').value='';
+ if(user){$('who').textContent=user.email;await list()}
+}
+try{
+ if(!window.supabase)throw Error('연결 라이브러리를 불러오지 못했습니다. 새로고침해 주세요.');
+ db=supabase.createClient('https://dwkqlmbgtcoexhrozsha.supabase.co','sb_publishable_meAmXWIR-_7xZhjjwP-hPQ_XyQ0vXNU');
+ $('loginForm').onsubmit=e=>{e.preventDefault();run(async()=>{const {data,error}=await db.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(error)throw error;$('password').value='';await show(data.session)})};
+ $('signup').onclick=()=>{if(!$('loginForm').reportValidity())return;run(async()=>{const {data,error}=await db.auth.signUp({email:$('email').value.trim(),password:$('password').value});if(error)throw error;if(!data.session)throw Error('자동 로그인이 되지 않았습니다. 인증 설정을 확인해 주세요.');$('password').value='';await show(data.session)})};
+ $('logout').onclick=()=>run(async()=>{const {error}=await db.auth.signOut();if(error)throw error;await show(null)});
+ $('memoForm').onsubmit=e=>{e.preventDefault();run(async()=>{const content=$('content').value.trim();if(!content)throw Error('메모를 입력해 주세요.');if(!user)throw Error('로그인해 주세요.');const {error}=await db.from('memos').insert({user_id:user.id,content});if(error)throw error;$('content').value='';await list()},'저장 중…')};
+ db.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){user=null;$('auth').hidden=false;$('app').hidden=true;$('list').replaceChildren()}});
+ run(async()=>{const {data,error}=await db.auth.getSession();if(error)throw error;await show(data.session)});
+}catch(e){message('오류: '+e.message)}
+</script></html>
